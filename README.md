@@ -44,3 +44,29 @@ Node.js 20+, npm, and a Cloudflare account with Workers, D1, and R2 access.
 ## Status
 
 Starter implementation. Run tests and review Cloudflare bindings/secrets before using real case data.
+
+## One-command build and automatic Cloudflare deploy
+
+Run locally from the repository:
+
+```bash
+bash build.sh
+```
+
+The script installs dependencies, checks Cloudflare authentication, verifies the configured D1 ID, creates the private `diw-evidence` R2 bucket if it is missing, applies the idempotent SQL schema to remote D1, builds/type-checks the frontend, and deploys the Worker and static assets.
+
+Configured D1 ID: `46a1869b-82e5-49d4-9be2-1783eb663691`.
+
+### GitHub Actions auto-deploy
+
+Add these repository secrets under **Settings → Secrets and variables → Actions**:
+
+- `CLOUDFLARE_API_TOKEN` — token with appropriate Workers, D1, and R2 permissions.
+- `CLOUDFLARE_ACCOUNT_ID` — Cloudflare account ID.
+- `ACCESS_TEAM_DOMAIN` — e.g. `https://your-team.cloudflareaccess.com`.
+- `ACCESS_AUD` — Cloudflare Access application AUD tag.
+- `ADMIN_EMAILS` — comma-separated allowed admin email addresses.
+
+After secrets are configured, changes to `build.sh`, app/Worker code, migrations, or deployment configuration on `main` trigger the workflow, which runs `bash build.sh`. You can also run it manually from **Actions → Build and deploy DIW Advanced → Run workflow**.
+
+A change to `build.sh` runs on GitHub's hosted runner; it does not execute a shell on your personal computer. Keep the R2 bucket private and never commit API tokens. Add future schema changes as new migration files rather than modifying an already-applied migration.
