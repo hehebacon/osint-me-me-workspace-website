@@ -9,7 +9,7 @@ run_worker_first = ["/api/*"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "diw-db"
+database_name = "osint-me"
 database_id = "46a1869b-82e5-49d4-9be2-1783eb663691"
 migrations_dir = "migrations"
 
