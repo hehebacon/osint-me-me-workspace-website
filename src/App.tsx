@@ -3,6 +3,7 @@ import { Activity, Archive, ArrowUpRight, Bell, BookOpen, CheckCircle2, ChevronR
 
 type CaseItem = { id: string; title: string; objective: string; scope: string; status: 'open'|'review'|'closed'; created_by: string; created_at: string; updated_at: string };
 type ApiState = 'loading'|'connected'|'demo'|'error';
+type EvidenceItem = { id:string; case_id:string; filename:string; content_type:string; size_bytes:number; sha256:string; source_note:string; collected_by:string; collected_at:string; created_at:string };
 const demoCases: CaseItem[] = [
   { id:'CASE-DEMO-001', title:'Suspicious domain review', objective:'Review public DNS and TLS metadata for a reported suspicious domain.', scope:'Public sources and authorized indicators only', status:'open', created_by:'demo@local', created_at:new Date().toISOString(), updated_at:new Date().toISOString() },
   { id:'CASE-DEMO-002', title:'Endpoint log triage', objective:'Correlate supplied endpoint logs and timestamps.', scope:'Owner-provided logs only', status:'review', created_by:'demo@local', created_at:new Date().toISOString(), updated_at:new Date().toISOString() },
@@ -22,6 +23,11 @@ export default function App() {
   const [objective,setObjective] = useState('');
   const [notice,setNotice] = useState('');
   const [busy,setBusy] = useState(false);
+  const [evidence,setEvidence] = useState<EvidenceItem[]>([]);
+  const [selectedCase,setSelectedCase] = useState('');
+  const [selectedFile,setSelectedFile] = useState<File|null>(null);
+  const [sourceNote,setSourceNote] = useState('');
+  const [evidenceBusy,setEvidenceBusy] = useState(false);
 
   async function refresh() {
     try {
@@ -33,6 +39,20 @@ export default function App() {
   }
   useEffect(() => { void refresh(); }, []);
 
+  useEffect(() => {
+    if (active !== 'Evidence vault') return;
+    const caseId = selectedCase || cases[0]?.id;
+    if (!caseId || caseId.startsWith('CASE-DEMO-')) { setEvidence([]); return; }
+    if (!selectedCase) setSelectedCase(caseId);
+    void fetch('/api/cases/' + encodeURIComponent(caseId) + '/evidence')
+      .then(async response => {
+        if (!response.ok) throw new Error('Could not load evidence');
+        const data = await response.json() as {evidence:EvidenceItem[]};
+        setEvidence(data.evidence || []);
+      })
+      .catch(() => setEvidence([]));
+  }, [active, selectedCase, cases]);
+
   async function createCase(e: React.FormEvent) {
     e.preventDefault(); if (!title.trim()) return;
     setBusy(true); setNotice('');
@@ -43,6 +63,27 @@ export default function App() {
     } catch { setNotice('API unavailable or access not configured. This preview does not save new cases.'); }
     finally { setBusy(false); }
   }
+  async function uploadEvidence(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedCase || !selectedFile) { setNotice('Choose a case and a file first.'); return; }
+    setEvidenceBusy(true); setNotice('');
+    try {
+      const form = new FormData();
+      form.append('file',selectedFile);
+      form.append('source_note',sourceNote.trim());
+      const response = await fetch('/api/cases/' + encodeURIComponent(selectedCase) + '/evidence',{method:'POST',body:form});
+      const data = await response.json().catch(()=>({error:'Upload failed'})) as {error?:string};
+      if (!response.ok) throw new Error(data.error || 'Upload failed');
+      setSelectedFile(null); setSourceNote('');
+      const picker = document.getElementById('evidence-file') as HTMLInputElement|null;
+      if (picker) picker.value = '';
+      setNotice('Evidence uploaded and SHA-256 recorded.');
+      const listResponse = await fetch('/api/cases/' + encodeURIComponent(selectedCase) + '/evidence');
+      if (listResponse.ok) setEvidence(((await listResponse.json()) as {evidence:EvidenceItem[]}).evidence || []);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Evidence upload failed.'); }
+    finally { setEvidenceBusy(false); }
+  }
+
   const visibleCases = cases.filter(c => `${c.title} ${c.id} ${c.objective}`.toLowerCase().includes(query.toLowerCase()));
   const openCount = cases.filter(c=>c.status==='open').length;
   const reviewCount = cases.filter(c=>c.status==='review').length;
@@ -60,6 +101,18 @@ export default function App() {
         <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line"/> DIGITAL FORENSICS / OSINT</div><h1>{active==='Overview'?'Investigation overview':active}</h1><p className="subtitle">A traceable workspace for authorized digital investigations.</p></div><button className="primary-button" onClick={()=>setShowCreate(true)}><Plus size={17}/> New case</button></section>
         <section className="notice-banner"><div className="notice-icon"><ShieldAlert size={18}/></div><div><strong>Evidence-first workflow</strong><p>Keep source provenance, separate verified facts from hypotheses, and document the scope of every investigation.</p></div><span className="notice-tag">POLICY ACTIVE</span></section>
         {notice&&<div className="toast" role="status">{notice}<button onClick={()=>setNotice('')}>Dismiss</button></div>}
+        {active==='Evidence vault'&&<section className="panel evidence-workspace">
+          <div className="panel-header"><div><h2>Evidence intake</h2><p>Files are stored in the private GitHub vault; D1 records metadata and SHA-256.</p></div><div className="tiny-label">PRIVATE STORAGE</div></div>
+          <form className="modal" onSubmit={uploadEvidence}>
+            <label>Case<select value={selectedCase} onChange={e=>setSelectedCase(e.target.value)} required><option value="">Choose a case</option>{cases.filter(c=>!c.id.startsWith('CASE-DEMO-')).map(c=><option key={c.id} value={c.id}>{c.title} — {c.id}</option>)}</select></label>
+            <label>Evidence file<input id="evidence-file" type="file" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} required /></label>
+            <label>Source note (optional)<textarea rows={3} maxLength={2000} value={sourceNote} onChange={e=>setSourceNote(e.target.value)} placeholder="Collection source, time, and relevant context"/></label>
+            <div className="scope-note"><Shield size={16}/><span>Upload limit: 10 MiB. Only upload files you are authorized to handle.</span></div>
+            <div className="modal-actions"><button className="primary-button" disabled={evidenceBusy||!selectedFile||!selectedCase}>{evidenceBusy?'Uploading…':'Upload and hash'}</button></div>
+          </form>
+          <div className="panel-header"><div><h2>Stored evidence</h2><p>{evidence.length} item(s) for the selected case</p></div></div>
+          {evidence.length ? <div className="case-list">{evidence.map(item=><div className="case-row" key={item.id}><div className="case-symbol symbol-1"><Archive size={18}/></div><div className="case-main"><strong>{item.filename}</strong><span>{item.size_bytes.toLocaleString()} bytes · SHA-256 {item.sha256.slice(0,16)}…</span><span>Collected by {item.collected_by} · {shortDate(item.collected_at)}</span></div><a className="text-button" href={'/api/cases/' + encodeURIComponent(item.case_id) + '/evidence/' + encodeURIComponent(item.id) + '/download'}>Download</a></div>)}</div>:<div className="empty-state">No evidence loaded for this case. Select a real case and upload a file to begin.</div>}
+        </section>}
         <section className="metric-grid">
           <article className="metric-card"><div className="metric-head"><span>Active cases</span><div className="metric-icon blue"><FolderOpen size={18}/></div></div><div className="metric-value">{openCount.toString().padStart(2,'0')}<span className="metric-unit">cases</span></div><div className="metric-foot"><span className="status-dot blue-dot"/>Open investigations</div></article>
           <article className="metric-card"><div className="metric-head"><span>Awaiting review</span><div className="metric-icon amber"><FileSearch size={18}/></div></div><div className="metric-value">{reviewCount.toString().padStart(2,'0')}<span className="metric-unit">cases</span></div><div className="metric-foot"><span className="status-dot amber-dot"/>Require verification</div></article>
