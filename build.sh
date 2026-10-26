@@ -4,7 +4,7 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
 APP_NAME="diw-advanced"
-D1_NAME="diw-db"
+D1_NAME="osint-me"
 D1_ID="46a1869b-82e5-49d4-9be2-1783eb663691"
 R2_NAME="diw-evidence"
 MIGRATION="migrations/0001_init.sql"
