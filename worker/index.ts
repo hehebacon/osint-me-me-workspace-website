@@ -146,11 +146,11 @@ export default {
           console.error('GitHub evidence download failed with status',stored.status);
           return json({error:'Evidence file could not be retrieved from private storage.'},502);
         }
-        await audit(env,user.email,'evidence.download','evidence',evidenceId,{caseId,sha256:item.sha256});
         const bytes = await stored.arrayBuffer();
         const digest = await crypto.subtle.digest('SHA-256',bytes);
         const actualSha256 = Array.from(new Uint8Array(digest)).map(v=>v.toString(16).padStart(2,'0')).join('');
         if (actualSha256 !== item.sha256) return json({error:'Evidence integrity check failed. Stored bytes do not match the recorded SHA-256.'},409);
+        try { await audit(env,user.email,'evidence.download','evidence',evidenceId,{caseId,sha256:item.sha256}); } catch { console.error('Evidence download audit event could not be recorded'); }
         const filename = item.filename.replace(/["\\\r\n]/g,'_');
         return new Response(bytes,{status:200,headers:{
           'content-type':item.content_type || 'application/octet-stream',
