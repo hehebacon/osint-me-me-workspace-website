@@ -16,8 +16,8 @@ command -v node >/dev/null || fail "Node.js is required (Node 20+ recommended)."
 command -v npm >/dev/null || fail "npm is required."
 [[ -f package.json && -f "$MIGRATION" ]] || fail "Run this script from the project repository."
 
-export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
-export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-}"
+if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then export CLOUDFLARE_API_TOKEN; fi
+if [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then export CLOUDFLARE_ACCOUNT_ID; fi
 
 info "Install dependencies"
 npm install
