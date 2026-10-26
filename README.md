@@ -28,7 +28,7 @@ Node.js 20+, npm, a Cloudflare account with Workers and D1, and a fine-grained G
 3. Apply schema: `npx wrangler d1 execute diw-db --remote --file=./migrations/0001_init.sql`.
 4. Configure Worker secrets/vars: `ACCESS_TEAM_DOMAIN` (e.g. `https://team-name.cloudflareaccess.com`), `ACCESS_AUD` (Access application's AUD tag), and `ADMIN_EMAILS` (comma-separated allowlist). Set these using `wrangler secret put` where appropriate; do not commit real values.
 5. Create a Cloudflare Access self-hosted application for the Worker hostname. Require identity authentication and restrict access to the intended users. The API rejects requests without a valid Access JWT.
-6. Add a GitHub Actions secret named `GITHUB_TOKEN` containing a fine-grained token limited to `diw-evidence-vault` with Contents read/write access. The deploy workflow copies it to the Worker secret.
+6. Add a GitHub Actions secret named `DIW_EVIDENCE_GH_TOKEN` containing a fine-grained token limited to `diw-evidence-vault` with Contents read/write access. The deploy workflow copies it to the Worker secret.
 7. `npm run build` then `npm run deploy`.
 
 ## Security notes
@@ -66,7 +66,7 @@ Add these repository secrets under **Settings → Secrets and variables → Acti
 - `ACCESS_TEAM_DOMAIN` — e.g. `https://your-team.cloudflareaccess.com`.
 - `ACCESS_AUD` — Cloudflare Access application AUD tag.
 - `ADMIN_EMAILS` — comma-separated allowed admin email addresses.
-- `GITHUB_TOKEN` — fine-grained GitHub token restricted to `hehebacon/diw-evidence-vault`, Contents read/write only.
+- `DIW_EVIDENCE_GH_TOKEN` — fine-grained GitHub token restricted to `hehebacon/diw-evidence-vault`, Contents read/write only.
 
 After secrets are configured, changes to `build.sh`, app/Worker code, migrations, or deployment configuration on `main` trigger the workflow, which runs `bash build.sh`. You can also run it manually from **Actions → Build and deploy DIW Advanced → Run workflow**.
 
