@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
-  EVIDENCE: R2Bucket;
+  GITHUB_TOKEN: string;
+  GITHUB_REPOSITORY: string;
   ASSETS: Fetcher;
   ACCESS_TEAM_DOMAIN: string;
   ACCESS_AUD: string;
@@ -46,6 +47,24 @@ async function audit(env: Env, actor: string, action: string, type: string, obje
     .bind(id('audit'),actor,action,type,objectId,JSON.stringify(details),now()).run();
 }
 function safeFilename(name: string) { return name.replace(/[\\/\x00-\x1f\x7f]/g,'_').slice(0,180) || 'evidence.bin'; }
+function githubRepo(env: Env) {
+  const value = (env.GITHUB_REPOSITORY || '').trim();
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value) || !env.GITHUB_TOKEN) throw new Error('GitHub evidence storage is not configured.');
+  return value;
+}
+function githubHeaders(env: Env, accept = 'application/vnd.github+json') {
+  return { Authorization: `Bearer ${env.GITHUB_TOKEN}`, Accept: accept, 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'DIW-Advanced-Evidence-Vault' };
+}
+function githubContentsUrl(env: Env, path: string) {
+  const repo = githubRepo(env);
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  return `https://api.github.com/repos/${repo}/contents/${encodedPath}`;
+}
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + 0x8000, bytes.length)));
+  return btoa(binary);
+}
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -87,19 +106,57 @@ export default {
         const bytes = await file.arrayBuffer();
         const digest = await crypto.subtle.digest('SHA-256',bytes);
         const sha256 = Array.from(new Uint8Array(digest)).map(v=>v.toString(16).padStart(2,'0')).join('');
-        const evidenceId = id('ev'); const timestamp = now(); const storageKey = `${caseId}/${evidenceId}`;
-        await env.EVIDENCE.put(storageKey,bytes,{httpMetadata:{contentType:'application/octet-stream'},customMetadata:{sha256,originalFilename:safeFilename(file.name),caseId}});
+        const evidenceId = id('ev'); const timestamp = now();
+        const cleanName = safeFilename(file.name).replace(/[^A-Za-z0-9._-]/g,'_') || 'evidence.bin';
+        const storageKey = `evidence/${caseId}/${evidenceId}-${cleanName}`;
+        const uploadResponse = await fetch(githubContentsUrl(env,storageKey), {
+          method:'PUT',
+          headers:{...githubHeaders(env),'content-type':'application/json'},
+          body:JSON.stringify({message:`DIW evidence upload ${evidenceId}`,content:bytesToBase64(new Uint8Array(bytes))})
+        });
+        if (!uploadResponse.ok) {
+          console.error('GitHub evidence upload failed with status', uploadResponse.status);
+          return json({error:'Private evidence storage rejected the upload. Check the server-side GitHub token and repository permissions.'},502);
+        }
+        const uploadResult = await uploadResponse.json() as {content?:{sha?:string}};
+        const githubFileSha = uploadResult.content?.sha || '';
+        if (!githubFileSha) return json({error:'Evidence storage provider returned an invalid response.'},502);
         try {
           await env.DB.prepare('INSERT INTO evidence (id,case_id,filename,content_type,size_bytes,sha256,storage_key,source_note,collected_by,collected_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
             .bind(evidenceId,caseId,safeFilename(file.name),file.type || 'application/octet-stream',file.size,sha256,storageKey,typeof sourceNote==='string'?sourceNote.slice(0,2000):'',user.email,timestamp,timestamp).run();
-          await audit(env,user.email,'evidence.upload','evidence',evidenceId,{caseId,sizeBytes:file.size,sha256});
-        } catch (error) { await env.EVIDENCE.delete(storageKey); throw error; }
+          await audit(env,user.email,'evidence.upload','evidence',evidenceId,{caseId,sizeBytes:file.size,sha256,storage:'github-private-repository'});
+        } catch (error) {
+          try { await fetch(githubContentsUrl(env,storageKey),{method:'DELETE',headers:{...githubHeaders(env),'content-type':'application/json'},body:JSON.stringify({message:`Rollback DIW evidence ${evidenceId}`,sha:githubFileSha})}); } catch {}
+          throw error;
+        }
         return json({id:evidenceId,case_id:caseId,filename:safeFilename(file.name),size_bytes:file.size,sha256,collected_by:user.email,collected_at:timestamp},201);
       }
       const evidenceMatch = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9_-]+)\/evidence$/);
       if (evidenceMatch && request.method === 'GET') {
         const result = await env.DB.prepare('SELECT id,case_id,filename,content_type,size_bytes,sha256,source_note,collected_by,collected_at,created_at FROM evidence WHERE case_id = ? ORDER BY created_at DESC LIMIT 200').bind(evidenceMatch[1]).all();
         return json({evidence:result.results || []});
+      }
+      const downloadMatch = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9_-]+)\/evidence\/([A-Za-z0-9_-]+)\/download$/);
+      if (downloadMatch && request.method === 'GET') {
+        const caseId = downloadMatch[1]; const evidenceId = downloadMatch[2];
+        const item = await env.DB.prepare('SELECT filename,content_type,storage_key,sha256 FROM evidence WHERE id = ? AND case_id = ?').bind(evidenceId,caseId).first() as {filename:string;content_type:string;storage_key:string;sha256:string} | null;
+        if (!item) return json({error:'Evidence not found.'},404);
+        const stored = await fetch(githubContentsUrl(env,item.storage_key),{headers:githubHeaders(env,'application/vnd.github.raw')});
+        if (!stored.ok) {
+          console.error('GitHub evidence download failed with status',stored.status);
+          return json({error:'Evidence file could not be retrieved from private storage.'},502);
+        }
+        const bytes = await stored.arrayBuffer();
+        const digest = await crypto.subtle.digest('SHA-256',bytes);
+        const actualSha256 = Array.from(new Uint8Array(digest)).map(v=>v.toString(16).padStart(2,'0')).join('');
+        if (actualSha256 !== item.sha256) return json({error:'Evidence integrity check failed. Stored bytes do not match the recorded SHA-256.'},409);
+        try { await audit(env,user.email,'evidence.download','evidence',evidenceId,{caseId,sha256:item.sha256}); } catch { console.error('Evidence download audit event could not be recorded'); }
+        const filename = item.filename.replace(/["\\\r\n]/g,'_');
+        return new Response(bytes,{status:200,headers:{
+          'content-type':item.content_type || 'application/octet-stream',
+          'content-disposition':`attachment; filename="${filename}"`,
+          'cache-control':'no-store','x-content-type-options':'nosniff','x-evidence-sha256':item.sha256
+        }});
       }
       return json({error:'Route not found.'},404);
     } catch (error) {

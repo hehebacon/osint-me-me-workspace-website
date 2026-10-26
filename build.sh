@@ -6,7 +6,6 @@ cd "$ROOT_DIR"
 APP_NAME="diw-advanced"
 D1_NAME="osint-me"
 D1_ID="46a1869b-82e5-49d4-9be2-1783eb663691"
-R2_NAME="diw-evidence"
 MIGRATION="migrations/0001_init.sql"
 
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -29,12 +28,8 @@ info "Confirm configured D1 database ID"
 grep -Fq "$D1_ID" wrangler.toml || fail "wrangler.toml does not point at expected D1 ID $D1_ID."
 npx wrangler d1 list
 
-info "Ensure R2 bucket exists"
-if ! npx wrangler r2 bucket list 2>/dev/null | grep -Fq "$R2_NAME"; then
-  npx wrangler r2 bucket create "$R2_NAME"
-else
-  info "R2 bucket already exists"
-fi
+info "Verify GitHub evidence repository configuration"
+grep -Fq 'GITHUB_REPOSITORY = "hehebacon/diw-evidence-vault"' wrangler.toml || fail "Expected private GitHub evidence repository is not configured."
 
 info "Apply idempotent D1 schema to remote database"
 npx wrangler d1 execute "$D1_NAME" --remote --file="./$MIGRATION"
