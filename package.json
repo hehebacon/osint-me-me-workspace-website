@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit && vite build",
     "deploy": "npm run build && wrangler deploy",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc --noEmit --pretty false"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
@@ -18,6 +18,8 @@
     "lucide-react": "latest"
   },
   "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
     "@cloudflare/workers-types": "latest",
     "wrangler": "latest"
   }
