@@ -141,14 +141,18 @@ export default {
         const caseId = downloadMatch[1]; const evidenceId = downloadMatch[2];
         const item = await env.DB.prepare('SELECT filename,content_type,storage_key,sha256 FROM evidence WHERE id = ? AND case_id = ?').bind(evidenceId,caseId).first() as {filename:string;content_type:string;storage_key:string;sha256:string} | null;
         if (!item) return json({error:'Evidence not found.'},404);
-        const stored = await fetch(githubContentsUrl(env,item.storage_key),{headers:githubHeaders(env,'application/vnd.github.raw+json')});
+        const stored = await fetch(githubContentsUrl(env,item.storage_key),{headers:githubHeaders(env,'application/vnd.github.raw')});
         if (!stored.ok) {
           console.error('GitHub evidence download failed with status',stored.status);
           return json({error:'Evidence file could not be retrieved from private storage.'},502);
         }
         await audit(env,user.email,'evidence.download','evidence',evidenceId,{caseId,sha256:item.sha256});
+        const bytes = await stored.arrayBuffer();
+        const digest = await crypto.subtle.digest('SHA-256',bytes);
+        const actualSha256 = Array.from(new Uint8Array(digest)).map(v=>v.toString(16).padStart(2,'0')).join('');
+        if (actualSha256 !== item.sha256) return json({error:'Evidence integrity check failed. Stored bytes do not match the recorded SHA-256.'},409);
         const filename = item.filename.replace(/["\\\r\n]/g,'_');
-        return new Response(stored.body,{status:200,headers:{
+        return new Response(bytes,{status:200,headers:{
           'content-type':item.content_type || 'application/octet-stream',
           'content-disposition':`attachment; filename="${filename}"`,
           'cache-control':'no-store','x-content-type-options':'nosniff','x-evidence-sha256':item.sha256
