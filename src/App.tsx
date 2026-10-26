@@ -103,7 +103,7 @@ export default function App() {
         {notice&&<div className="toast" role="status">{notice}<button onClick={()=>setNotice('')}>Dismiss</button></div>}
         {active==='Evidence vault'&&<section className="panel evidence-workspace">
           <div className="panel-header"><div><h2>Evidence intake</h2><p>Files are stored in the private GitHub vault; D1 records metadata and SHA-256.</p></div><div className="tiny-label">PRIVATE STORAGE</div></div>
-          <form className="modal" onSubmit={uploadEvidence}>
+          <form className="evidence-form" onSubmit={uploadEvidence}>
             <label>Case<select value={selectedCase} onChange={e=>setSelectedCase(e.target.value)} required><option value="">Choose a case</option>{cases.filter(c=>!c.id.startsWith('CASE-DEMO-')).map(c=><option key={c.id} value={c.id}>{c.title} — {c.id}</option>)}</select></label>
             <label>Evidence file<input id="evidence-file" type="file" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} required /></label>
             <label>Source note (optional)<textarea rows={3} maxLength={2000} value={sourceNote} onChange={e=>setSourceNote(e.target.value)} placeholder="Collection source, time, and relevant context"/></label>
